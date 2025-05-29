@@ -5,19 +5,31 @@ from datetime import datetime
 app = Flask(__name__)
 
 # Подключаем базу данных SQLite
-conn = sqlite3.connect('1win_registrations.db', check_same_thread=False)
-cursor = conn.cursor()
+def get_db_connection():
+    conn = sqlite3.connect('1win_registrations.db', check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-# Создаем таблицу для хранения регистраций
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    registration_date TEXT,
-    hash_id TEXT,
-    source_id TEXT
-)
-''')
-conn.commit()
+# Инициализация базы данных
+def init_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        registration_date TEXT,
+        hash_id TEXT,
+        source_id TEXT
+    )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+@app.route('/')
+def index():
+    return "1Win Postback Server is running"
 
 @app.route('/1win_postback', methods=['GET'])
 def handle_postback():
@@ -28,14 +40,25 @@ def handle_postback():
         hash_id = request.args.get('hash_id')
         source_id = request.args.get('source_id')  # Это должен быть user_id из Telegram
 
+        # Проверяем обязательные параметры
+        if not all([event_id, date, hash_id, source_id]):
+            return 'Missing parameters', 400
+
         # Проверяем, что это событие регистрации (event_id=1)
         if event_id == '1':
-            reg_date = datetime.fromtimestamp(int(date)).strftime('%Y-%m-%d %H:%M:%S')
+            try:
+                reg_date = datetime.fromtimestamp(int(date)).strftime('%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                return 'Invalid date format', 400
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
             cursor.execute('''
             INSERT OR IGNORE INTO users (user_id, registration_date, hash_id, source_id)
             VALUES (?, ?, ?, ?)
             ''', (source_id, reg_date, hash_id, source_id))
             conn.commit()
+            conn.close()
             return 'OK', 200
         
         return 'Invalid event', 400
